@@ -1,329 +1,440 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Perfect Weather Days – Americas</title>
-
-  <!-- Leaflet CSS -->
-  <link rel="stylesheet"
-        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
+    /* ── Reset & base ─────────────────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+    /* ── Theme variables ──────────────────────────────────────────────────── */
+    :root {
+      --bg:           #f0f0f0;
+      --panel-bg:     rgba(255, 255, 255, 0.93);
+      --panel-border: rgba(0, 0, 0, 0.10);
+      --shadow:       0 2px 12px rgba(0,0,0,0.13);
+      --text:         #1a1a1a;
+      --text-muted:   #666;
+      --divider:      rgba(0,0,0,0.10);
+      --nodata-fill:  #ccc;
+      --county-stroke:#fff;
+      --county-sw:    0.3;
+    }
+    [data-theme="dark"] {
+      --bg:           #111418;
+      --panel-bg:     rgba(20, 24, 30, 0.93);
+      --panel-border: rgba(255,255,255,0.10);
+      --shadow:       0 2px 14px rgba(0,0,0,0.50);
+      --text:         #e8ecf0;
+      --text-muted:   #8a9ab0;
+      --divider:      rgba(255,255,255,0.10);
+      --nodata-fill:  #444;
+      --county-stroke:#2a2e35;
+      --county-sw:    0.4;
+    }
+
     body {
-      font-family: 'Segoe UI', Arial, sans-serif;
-      background: #0d1117;
-      color: #e6edf3;
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
       height: 100vh;
       overflow: hidden;
     }
 
     #map { width: 100%; height: 100vh; }
 
-    /* ── Title card ───────────────────────────────────────────────────────── */
-    #title-card {
+    /* ── Shared panel style ───────────────────────────────────────────────── */
+    .panel {
       position: absolute;
-      top: 12px;
+      z-index: 1000;
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 10px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      color: var(--text);
+      transition: background 0.3s, border-color 0.3s, color 0.3s;
+    }
+
+    /* ── Title ────────────────────────────────────────────────────────────── */
+    #title-card {
+      top: 14px;
       left: 50%;
       transform: translateX(-50%);
-      z-index: 1000;
-      background: rgba(13, 17, 23, 0.88);
-      border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 10px;
-      padding: 10px 20px;
+      padding: 9px 22px;
       text-align: center;
       pointer-events: none;
-      backdrop-filter: blur(6px);
       white-space: nowrap;
     }
     #title-card h1 {
-      font-size: 1.15em;
+      font-size: 1.05em;
       font-weight: 700;
-      letter-spacing: 0.02em;
-      margin-bottom: 3px;
+      letter-spacing: 0.01em;
+      margin-bottom: 2px;
     }
     #title-card p {
-      font-size: 0.72em;
-      opacity: 0.65;
+      font-size: 0.68em;
+      color: var(--text-muted);
     }
+
+    /* ── Theme toggle ─────────────────────────────────────────────────────── */
+    #theme-btn {
+      top: 14px;
+      right: 14px;
+      padding: 7px 13px;
+      cursor: pointer;
+      font-size: 0.78em;
+      font-weight: 600;
+      border: none;
+      background: var(--panel-bg);
+      color: var(--text);
+      border-radius: 10px;
+      border: 1px solid var(--panel-border);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(8px);
+      transition: background 0.3s, color 0.3s;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    #theme-btn:hover { filter: brightness(0.95); }
 
     /* ── Legend ───────────────────────────────────────────────────────────── */
     #legend {
-      position: absolute;
-      bottom: 28px;
-      right: 12px;
-      z-index: 1000;
-      background: rgba(13, 17, 23, 0.88);
-      border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 10px;
-      padding: 12px 16px;
-      min-width: 170px;
-      backdrop-filter: blur(6px);
+      bottom: 32px;
+      right: 14px;
+      padding: 14px 16px;
+      min-width: 174px;
     }
     #legend h4 {
-      font-size: 0.82em;
-      font-weight: 600;
-      margin-bottom: 8px;
+      font-size: 0.80em;
+      font-weight: 700;
       text-align: center;
-      letter-spacing: 0.03em;
+      margin-bottom: 9px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
     }
-    .legend-gradient {
-      height: 14px;
-      width: 100%;
+    .legend-bar {
+      height: 13px;
       border-radius: 4px;
-      background: linear-gradient(
-        to right,
-        #313695 0%,
-        #4575b4 25%,
-        #74add1 45%,
-        #a6d96a 65%,
-        #fdae61 82%,
-        #d73027 100%
-      );
+      background: linear-gradient(to right,
+        #2166ac 0%, #74add1 25%, #ffffbf 50%, #f46d43 75%, #d73027 100%);
       margin-bottom: 4px;
     }
-    .legend-labels {
+    .legend-ticks {
       display: flex;
       justify-content: space-between;
-      font-size: 0.68em;
-      opacity: 0.8;
+      font-size: 0.66em;
+      color: var(--text-muted);
     }
-    .legend-divider {
+    .legend-hr {
       border: none;
-      border-top: 1px solid rgba(255,255,255,0.12);
-      margin: 10px 0;
+      border-top: 1px solid var(--divider);
+      margin: 9px 0;
     }
     .legend-nodata {
       display: flex;
       align-items: center;
-      gap: 7px;
+      gap: 8px;
       font-size: 0.72em;
-      opacity: 0.8;
+      color: var(--text-muted);
     }
-    .legend-nodata-swatch {
-      width: 14px; height: 14px;
-      background: #777;
+    .nd-swatch {
+      width: 13px; height: 13px;
+      background: var(--nodata-fill);
       border-radius: 3px;
       flex-shrink: 0;
     }
 
     /* ── Criteria card ────────────────────────────────────────────────────── */
     #criteria {
-      position: absolute;
-      bottom: 28px;
-      left: 12px;
-      z-index: 1000;
-      background: rgba(13, 17, 23, 0.88);
-      border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 10px;
-      padding: 12px 16px;
+      bottom: 32px;
+      left: 14px;
+      padding: 13px 16px;
       font-size: 0.72em;
-      line-height: 1.7;
-      max-width: 210px;
-      backdrop-filter: blur(6px);
+      line-height: 1.75;
     }
     #criteria h4 {
-      font-size: 0.88em;
-      font-weight: 600;
-      margin-bottom: 6px;
-      letter-spacing: 0.03em;
+      font-size: 0.87em;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 5px;
     }
     #criteria .row { display: flex; gap: 6px; }
-    #criteria .label { opacity: 0.6; flex-shrink: 0; }
-    #criteria .source {
-      margin-top: 8px;
-      padding-top: 6px;
-      border-top: 1px solid rgba(255,255,255,0.12);
-      opacity: 0.5;
-      font-size: 0.92em;
+    #criteria .lbl { color: var(--text-muted); flex-shrink: 0; }
+    .crit-hr {
+      border: none;
+      border-top: 1px solid var(--divider);
+      margin: 7px 0;
     }
+    #criteria .src { font-size: 0.88em; color: var(--text-muted); }
+
+    /* ── Tooltip ──────────────────────────────────────────────────────────── */
+    .info-tip {
+      padding: 9px 13px;
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      font-size: 0.80em;
+      line-height: 1.5;
+      color: var(--text);
+      min-width: 140px;
+      pointer-events: none;
+    }
+    .info-tip strong { display: block; margin-bottom: 2px; }
 
     /* ── Loading overlay ──────────────────────────────────────────────────── */
     #loading {
-      position: absolute;
-      inset: 0;
-      z-index: 2000;
-      background: #0d1117;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 14px;
-      transition: opacity 0.5s;
+      position: fixed; inset: 0; z-index: 5000;
+      background: var(--bg);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 16px;
+      transition: opacity 0.4s;
     }
-    #loading.hidden { opacity: 0; pointer-events: none; }
-    #loading p { font-size: 0.9em; opacity: 0.6; }
+    #loading.fade { opacity: 0; pointer-events: none; }
+    #loading p { font-size: 0.88em; color: var(--text-muted); }
     .spinner {
-      width: 36px; height: 36px;
-      border: 3px solid rgba(255,255,255,0.1);
+      width: 38px; height: 38px;
+      border: 3px solid var(--panel-border);
       border-top-color: #4575b4;
       border-radius: 50%;
-      animation: spin 0.9s linear infinite;
+      animation: spin 0.85s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
-
-    /* ── Error banner ─────────────────────────────────────────────────────── */
-    #error-banner {
-      display: none;
-      position: absolute;
-      top: 60px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 1500;
-      background: rgba(180, 40, 40, 0.92);
-      border-radius: 8px;
-      padding: 12px 20px;
-      font-size: 0.82em;
-      max-width: 420px;
-      text-align: center;
-      line-height: 1.6;
-    }
   </style>
 </head>
 <body>
 
-<!-- Loading screen -->
 <div id="loading">
   <div class="spinner"></div>
-  <p>Loading weather data…</p>
-</div>
-
-<!-- Error banner (shown if weather_data.js is missing) -->
-<div id="error-banner">
-  <strong>weather_data.js not found.</strong><br>
-  Run <code>python3 fetch_data.py</code> first, then serve via<br>
-  <code>python3 -m http.server 8080</code> and visit <code>localhost:8080</code>.
+  <p>Loading map data…</p>
 </div>
 
 <div id="map"></div>
 
 <!-- Title -->
-<div id="title-card">
+<div class="panel" id="title-card">
   <h1>Perfect Weather Days per Year</h1>
-  <p>Canada &nbsp;·&nbsp; USA &nbsp;·&nbsp; Mexico &nbsp;·&nbsp; Central America (to Panama) &nbsp;|&nbsp; ERA5 reanalysis · 2021–2023 avg.</p>
+  <p>Canada &nbsp;·&nbsp; USA &nbsp;·&nbsp; Mexico &nbsp;·&nbsp; Central America &nbsp;|&nbsp; NOAA GSOD · 2021–2023</p>
 </div>
 
+<!-- Theme toggle (plain button, not inside .panel so it can style itself) -->
+<button id="theme-btn" onclick="toggleTheme()">🌙&nbsp;Dark</button>
+
 <!-- Legend -->
-<div id="legend">
-  <h4>Days&thinsp;/&thinsp;Year</h4>
-  <div class="legend-gradient"></div>
-  <div class="legend-labels">
-    <span>0</span><span>45</span><span>90</span><span>135</span><span>180+</span>
+<div class="panel" id="legend">
+  <h4>Days / Year</h4>
+  <div class="legend-bar"></div>
+  <div class="legend-ticks">
+    <span>0</span><span>50</span><span>100</span><span>150</span><span>200+</span>
   </div>
-  <hr class="legend-divider" />
+  <hr class="legend-hr" />
   <div class="legend-nodata">
-    <div class="legend-nodata-swatch"></div>
-    No data
+    <div class="nd-swatch"></div>No data
   </div>
 </div>
 
 <!-- Criteria -->
-<div id="criteria">
-  <h4>Perfect Day Criteria</h4>
-  <div class="row"><span class="label">Max temp</span><span>18 – 27 °C (65–80 °F)</span></div>
-  <div class="row"><span class="label">Min temp</span><span>&gt; 10 °C (50 °F)</span></div>
-  <div class="row"><span class="label">Precip</span><span>&lt; 2 mm</span></div>
-  <div class="row"><span class="label">Wind</span><span>&lt; 30 km/h</span></div>
-  <div class="source">Source: NOAA GSOD (AWS S3)</div>
+<div class="panel" id="criteria">
+  <h4>Perfect Day</h4>
+  <div class="row"><span class="lbl">Max temp</span><span>18–27 °C (65–80 °F)</span></div>
+  <div class="row"><span class="lbl">Min temp</span><span>&gt; 10 °C (50 °F)</span></div>
+  <div class="row"><span class="lbl">Rain</span><span>&lt; 2 mm</span></div>
+  <div class="row"><span class="lbl">Wind</span><span>&lt; 30 km/h</span></div>
+  <hr class="crit-hr" />
+  <div class="src">Source: NOAA GSOD (AWS S3)</div>
 </div>
 
-<!-- Leaflet -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
-<!-- Leaflet.heat -->
-<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
-
-<!-- Data (generated by fetch_data.py) -->
-<script src="weather_data.js"
-        onerror="document.getElementById('error-banner').style.display='block';
-                 document.getElementById('loading').classList.add('hidden');"></script>
-
+<script src="regions.js"></script>
 <script>
 (function () {
-  /* ── Check data loaded ─────────────────────────────────────────────────── */
-  if (typeof WEATHER_DATA === 'undefined') {
-    document.getElementById('loading').classList.add('hidden');
-    return;
+  'use strict';
+
+  // ── Color scale ─────────────────────────────────────────────────────────────
+  // Blue (worst) → yellow → Red (best)
+  var STOPS = [
+    [0,   [33,  102, 172]],   //  0 days  – dark blue
+    [50,  [116, 173, 209]],   // 50 days  – light blue
+    [100, [255, 255, 191]],   //100 days  – pale yellow
+    [150, [244, 109,  67]],   //150 days  – orange
+    [200, [215,  48,  39]],   //200+ days – red
+  ];
+  var MAX_SCALE = STOPS[STOPS.length - 1][0];
+
+  function interpolate(a, b, t) {
+    return Math.round(a + (b - a) * t);
   }
 
-  /* ── Map setup ─────────────────────────────────────────────────────────── */
+  function valueToColor(val) {
+    if (val === null || val === undefined) return null;
+    var v = Math.min(val, MAX_SCALE);
+    for (var i = 1; i < STOPS.length; i++) {
+      if (v <= STOPS[i][0]) {
+        var lo = STOPS[i - 1], hi = STOPS[i];
+        var t  = (v - lo[0]) / (hi[0] - lo[0]);
+        return 'rgb(' + [0,1,2].map(function(c){
+          return interpolate(lo[1][c], hi[1][c], t);
+        }).join(',') + ')';
+      }
+    }
+    return 'rgb(215,48,39)';
+  }
+
+  // ── Map setup ────────────────────────────────────────────────────────────────
   var map = L.map('map', {
     center: [42, -97],
     zoom: 3,
     minZoom: 2,
-    maxZoom: 9,
+    maxZoom: 10,
+    preferCanvas: false,
     zoomControl: true,
-    attributionControl: true
   });
 
-  /* Dark basemap (CartoDB Dark Matter, no labels) */
-  L.tileLayer(
+  var lightTiles = L.tileLayer(
+    'https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png',
+    { attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> © <a href="https://carto.com/attributions">CARTO</a>',
+      subdomains: 'abcd', maxZoom: 20 }
+  );
+  var darkTiles = L.tileLayer(
     'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png',
-    {
-      attribution:
-        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> ' +
-        'contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-      subdomains: 'abcd',
-      maxZoom: 19
-    }
-  ).addTo(map);
-
-  /* Label overlay on top of the heatmap */
-  L.tileLayer(
+    { attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> © <a href="https://carto.com/attributions">CARTO</a>',
+      subdomains: 'abcd', maxZoom: 20 }
+  );
+  var labelTiles = L.tileLayer(
+    'https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png',
+    { subdomains: 'abcd', maxZoom: 20, pane: 'shadowPane' }
+  );
+  var labelTilesDark = L.tileLayer(
     'https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png',
-    { subdomains: 'abcd', maxZoom: 19, pane: 'shadowPane', opacity: 0.9 }
-  ).addTo(map);
+    { subdomains: 'abcd', maxZoom: 20, pane: 'shadowPane' }
+  );
 
-  /* ── Partition data ────────────────────────────────────────────────────── */
-  var MAX_DAYS = 180;   // colour scale ceiling
+  lightTiles.addTo(map);
+  labelTiles.addTo(map);
 
-  var heatPoints  = [];
-  var noDataPts   = [];
-
-  WEATHER_DATA.forEach(function (d) {
-    var lat = d[0], lon = d[1], val = d[2];
-    if (val !== null && val !== undefined) {
-      heatPoints.push([lat, lon, Math.min(val / MAX_DAYS, 1.0)]);
-    } else {
-      noDataPts.push([lat, lon]);
+  // ── Hover tooltip ─────────────────────────────────────────────────────────
+  var tooltip = L.control({ position: 'topright' });
+  tooltip.onAdd = function () {
+    this._div = L.DomUtil.create('div', 'info-tip');
+    this._div.style.display = 'none';
+    return this._div;
+  };
+  tooltip.update = function (props) {
+    if (!props) {
+      this._div.style.display = 'none';
+      return;
     }
-  });
+    this._div.style.display = 'block';
+    var days  = props.perfect_days;
+    var label = days !== null && days !== undefined
+      ? '<span style="color:' + valueToColor(days) + ';font-weight:700;font-size:1.1em">'
+        + days.toFixed(1) + '</span> days / yr'
+      : '<span style="color:#999">No data</span>';
+    var name  = props.name  || '—';
+    var admin = props.admin || '';
+    this._div.innerHTML =
+      '<strong>' + name + '</strong>' +
+      (admin && admin !== name ? '<span style="opacity:.6;font-size:.88em"> · ' + admin + '</span>' : '') +
+      '<br>' + label;
+  };
+  tooltip.addTo(map);
 
-  /* ── Heatmap layer ─────────────────────────────────────────────────────── */
-  L.heatLayer(heatPoints, {
-    minOpacity : 0.45,
-    maxZoom    : 9,
-    max        : 1.0,
-    radius     : 38,
-    blur       : 28,
-    gradient   : {
-      0.00: '#313695',
-      0.28: '#4575b4',
-      0.50: '#74add1',
-      0.68: '#a6d96a',
-      0.85: '#fdae61',
-      1.00: '#d73027'
-    }
+  // ── Style helpers ────────────────────────────────────────────────────────
+  function featureStyle(feature) {
+    var val   = feature.properties.perfect_days;
+    var fill  = val !== null && val !== undefined
+      ? valueToColor(val)
+      : getComputedStyle(document.documentElement).getPropertyValue('--nodata-fill').trim() || '#ccc';
+    var sw  = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--county-sw')) || 0.3;
+    var sc  = getComputedStyle(document.documentElement).getPropertyValue('--county-stroke').trim() || '#fff';
+    return {
+      fillColor:   fill,
+      fillOpacity: 0.82,
+      color:       sc,
+      weight:      sw,
+    };
+  }
+
+  function highlightStyle(feature) {
+    var base = featureStyle(feature);
+    base.weight      = 1.8;
+    base.fillOpacity = 0.95;
+    return base;
+  }
+
+  var geojsonLayer;
+
+  function onEachFeature(feature, layer) {
+    layer.on({
+      mouseover: function (e) {
+        tooltip.update(feature.properties);
+        e.target.setStyle(highlightStyle(feature));
+        if (!L.Browser.ie && !L.Browser.opera && !L.Browser.edge) {
+          e.target.bringToFront();
+        }
+      },
+      mouseout: function (e) {
+        tooltip.update(null);
+        geojsonLayer.resetStyle(e.target);
+      },
+      click: function (e) {
+        map.fitBounds(e.target.getBounds(), { maxZoom: 8, padding: [30, 30] });
+      },
+    });
+  }
+
+  // ── Render ───────────────────────────────────────────────────────────────
+  if (typeof REGIONS_DATA === 'undefined') {
+    document.getElementById('loading').innerHTML =
+      '<p style="color:#c0392b;text-align:center;padding:20px">' +
+      '<strong>regions.js not found.</strong><br>' +
+      'Run <code>python3 generate_regions.py</code> then commit regions.js.</p>';
+    return;
+  }
+
+  geojsonLayer = L.geoJSON(REGIONS_DATA, {
+    style: featureStyle,
+    onEachFeature: onEachFeature,
   }).addTo(map);
 
-  /* ── No-data markers ───────────────────────────────────────────────────── */
-  noDataPts.forEach(function (pt) {
-    L.circleMarker([pt[0], pt[1]], {
-      radius      : 3,
-      fillColor   : '#777',
-      color       : '#555',
-      weight      : 1,
-      opacity     : 0.6,
-      fillOpacity : 0.5
-    }).addTo(map);
-  });
-
-  /* ── Hide loading screen ───────────────────────────────────────────────── */
+  // ── Hide loading screen ──────────────────────────────────────────────────
   var loading = document.getElementById('loading');
-  loading.classList.add('hidden');
-  setTimeout(function () { loading.style.display = 'none'; }, 600);
+  loading.classList.add('fade');
+  setTimeout(function () { loading.style.display = 'none'; }, 500);
+
+  // ── Light / dark toggle ──────────────────────────────────────────────────
+  var isDark = false;
+
+  window.toggleTheme = function () {
+    isDark = !isDark;
+    var root = document.documentElement;
+    root.setAttribute('data-theme', isDark ? 'dark' : 'light');
+
+    if (isDark) {
+      map.removeLayer(lightTiles);
+      map.removeLayer(labelTiles);
+      darkTiles.addTo(map);
+      labelTilesDark.addTo(map);
+    } else {
+      map.removeLayer(darkTiles);
+      map.removeLayer(labelTilesDark);
+      lightTiles.addTo(map);
+      labelTiles.addTo(map);
+    }
+
+    // Refresh county borders so CSS vars re-apply
+    geojsonLayer.setStyle(featureStyle);
+
+    var btn = document.getElementById('theme-btn');
+    btn.innerHTML = isDark ? '☀\u00a0Light' : '🌙\u00a0Dark';
+  };
+
 })();
 </script>
 </body>
