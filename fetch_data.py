@@ -4,7 +4,7 @@ Build a "perfect weather days per year" dataset using NOAA GSOD data
 from AWS S3 (public bucket, no auth required).
 
 Pipeline:
-  1. Download ISD station history from S3  →  filter Americas stations
+  1. Download ISD station history from S3  →  filter global stations
   2. Pick one representative station per 3-degree geographic cell
   3. Fetch GSOD CSVs (2021, 2022, 2023) for each chosen station
   4. Count "perfect" days, average over the 3 years
@@ -31,8 +31,8 @@ import time
 import requests
 
 # ── Region ────────────────────────────────────────────────────────────────────
-LAT_MIN, LAT_MAX = 7.0,  84.0   # Panama → high Arctic
-LON_MIN, LON_MAX = -140.0, -55.0 # Alaska → Atlantic coast
+LAT_MIN, LAT_MAX = -60.0, 83.0   # Antarctica edge → Arctic (skip deep Antarctic)
+LON_MIN, LON_MAX = -180.0, 180.0  # Full global coverage
 CELL_DEG = 3                      # degrees per selection cell
 
 # ── Perfect-day thresholds (GSOD native units) ────────────────────────────────
@@ -105,7 +105,7 @@ def load_isd_stations():
         except (ValueError, KeyError):
             continue
 
-    print(f"  {len(stations)} Americas stations found in ISD history")
+    print(f"  {len(stations)} global stations found in ISD history")
     return stations
 
 

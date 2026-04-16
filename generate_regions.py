@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """
 Build regions.js:
-  • US counties   → Natural Earth 10m admin-2 counties (1.7 MB on GitHub)
-  • Non-US Americas → Natural Earth 10m admin-1 states/provinces (12 MB on GitHub)
+  • US counties  → Natural Earth 10m admin-2 counties (only country covered at admin-2)
+  • World (non-US) → Natural Earth 10m admin-1 states/provinces (4,596 features globally)
   Each polygon is enriched with the 'perfect_days' value from its nearest
   NOAA weather station (read from weather_data.js).
+
+  Note on Canada: Natural Earth admin-1 provides 13 provinces/territories for Canada.
+  No finer-resolution Canadian boundary data is available from public GeoJSON sources.
 
 Run once after fetch_data.py; commit the resulting regions.js.
 """
@@ -15,9 +18,9 @@ import os
 import re
 import requests
 
-# ── Region bounds ─────────────────────────────────────────────────────────────
-LAT_MIN, LAT_MAX = 7.0,  84.0    # Panama → high Arctic
-LON_MIN, LON_MAX = -140.0, -55.0  # Alaska → Atlantic coast
+# ── Region bounds (global) ────────────────────────────────────────────────────
+LAT_MIN, LAT_MAX = -60.0, 83.0    # Antarctica edge → Arctic
+LON_MIN, LON_MAX = -180.0, 180.0  # Full globe
 
 MAX_DIST_DEG = 5.5   # ignore station if centroid is farther away (deg)
 COORD_PREC   = 3     # round coordinate decimals to trim file size
@@ -174,14 +177,14 @@ def main():
         )
         all_features.extend(us_feats)
 
-    # ── 2. Non-US Americas admin-1 (Canada, Mexico, Central America) ──────────
-    print("\n[2/2]  Americas admin-1 — Natural Earth 10m admin-1")
+    # ── 2. Rest of world admin-1 ─────────────────────────────────────────────
+    print("\n[2/2]  World admin-1 — Natural Earth 10m admin-1")
     admin1 = download(ADMIN1_URL, "admin-1 states/provinces")
     if admin1:
         # Exclude the US — we already have county-level US from admin-2
         non_us = process(
             admin1["features"], stations,
-            "Americas admin-1 (non-US)",
+            "World admin-1 (non-US)",
             skip_admins={"United States of America"},
         )
         all_features.extend(non_us)
@@ -199,9 +202,10 @@ def main():
     body = json.dumps(geojson_out, separators=(",", ":"))
 
     header = (
-        "// Perfect-weather choropleth data\n"
+        "// Perfect-weather choropleth data — worldwide\n"
         "// US counties: Natural Earth 10m admin-2\n"
-        "// Americas admin-1: Natural Earth 10m admin-1\n"
+        "// World (non-US) admin-1: Natural Earth 10m admin-1\n"
+        "// Canada: 13 provinces/territories (finest granularity available)\n"
         "// properties.perfect_days = avg days/yr (null = no data)\n"
     )
     with open(OUTPUT, "w") as f:

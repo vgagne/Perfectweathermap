@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Perfect Weather Days – Americas</title>
+  <title>Perfect Weather Days – World</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
     /* ── Reset & base ─────────────────────────────────────────────────────── */
@@ -220,7 +220,7 @@
 <!-- Title -->
 <div class="panel" id="title-card">
   <h1>Perfect Weather Days per Year</h1>
-  <p>Canada &nbsp;·&nbsp; USA &nbsp;·&nbsp; Mexico &nbsp;·&nbsp; Central America &nbsp;|&nbsp; NOAA GSOD · 2021–2023</p>
+  <p>World &nbsp;|&nbsp; NOAA GSOD · 2021–2023</p>
 </div>
 
 <!-- Theme toggle (plain button, not inside .panel so it can style itself) -->
@@ -288,8 +288,8 @@
 
   // ── Map setup ────────────────────────────────────────────────────────────────
   var map = L.map('map', {
-    center: [42, -97],
-    zoom: 3,
+    center: [25, 10],
+    zoom: 2,
     minZoom: 2,
     maxZoom: 10,
     preferCanvas: false,
