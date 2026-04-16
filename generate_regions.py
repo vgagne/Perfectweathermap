@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """
 Build regions.js:
-  • US counties  → Natural Earth 10m admin-2 counties (only country covered at admin-2)
-  • World (non-US) → Natural Earth 10m admin-1 states/provinces (4,596 features globally)
-  Each polygon is enriched with the 'perfect_days' value from its nearest
-  NOAA weather station (read from weather_data.js).
+  • US counties   → Natural Earth 10m admin-2 counties (US only in that file)
+  • World (non-US) → Natural Earth 10m admin-1 states/provinces (4,596 global features)
 
-  Note on Canada: Natural Earth admin-1 provides 13 provinces/territories for Canada.
-  No finer-resolution Canadian boundary data is available from public GeoJSON sources.
+  Large regions (shoelace area > LARGE_REGION_DEG2) are split into a grid of
+  GRID_CELL_DEG-degree square cells, each tied to its nearest NOAA station.
+  This gives finer granularity for large provinces such as:
+    Canada (all provinces, the finest-resolution source available),
+    Russia's oblasts, Australia's states, Brazil's states, etc.
+
+  Each polygon/cell is enriched with the 'perfect_days' value from its
+  nearest NOAA station (read from weather_data.js).
 
 Run once after fetch_data.py; commit the resulting regions.js.
 """
@@ -19,11 +23,13 @@ import re
 import requests
 
 # ── Region bounds (global) ────────────────────────────────────────────────────
-LAT_MIN, LAT_MAX = -60.0, 83.0    # Antarctica edge → Arctic
-LON_MIN, LON_MAX = -180.0, 180.0  # Full globe
+LAT_MIN, LAT_MAX  = -60.0, 83.0   # Antarctica edge → Arctic
+LON_MIN, LON_MAX  = -180.0, 180.0 # Full globe
 
-MAX_DIST_DEG = 5.5   # ignore station if centroid is farther away (deg)
-COORD_PREC   = 3     # round coordinate decimals to trim file size
+MAX_DIST_DEG      = 5.5   # ignore station if centroid is farther away (deg)
+COORD_PREC        = 3     # round coordinate decimals to trim file size
+LARGE_REGION_DEG2 = 30    # shoelace area threshold (deg²) → split into grid
+GRID_CELL_DEG     = 3     # must match CELL_DEG in fetch_data.py
 
 # ── GitHub raw URLs (accessible through this environment's proxy) ─────────────
 ADMIN2_URL = (
@@ -98,21 +104,138 @@ def download(url, label):
         return None
 
 
+# ── Large-region grid splitting ───────────────────────────────────────────────
+
+def shoelace_area(ring):
+    """Area of a ring in degrees² using the Shoelace formula."""
+    n = len(ring)
+    area = 0.0
+    for i in range(n):
+        j = (i + 1) % n
+        area += ring[i][0] * ring[j][1]
+        area -= ring[j][0] * ring[i][1]
+    return abs(area) / 2.0
+
+
+def feature_area_deg2(geom):
+    """Total area of outer rings in degrees²."""
+    if geom["type"] == "Polygon":
+        return shoelace_area(geom["coordinates"][0])
+    if geom["type"] == "MultiPolygon":
+        return sum(shoelace_area(p[0]) for p in geom["coordinates"])
+    return 0.0
+
+
+def point_in_ring(lat, lon, ring):
+    """Ray-casting point-in-polygon test. ring is list of [lon, lat] pairs."""
+    inside = False
+    n = len(ring)
+    j = n - 1
+    for i in range(n):
+        xi, yi = ring[i][0], ring[i][1]   # lon, lat
+        xj, yj = ring[j][0], ring[j][1]
+        if (yi > lat) != (yj > lat):
+            if lon < (xj - xi) * (lat - yi) / (yj - yi) + xi:
+                inside = not inside
+        j = i
+    return inside
+
+
+def point_in_geom(lat, lon, geom):
+    """True if (lat, lon) is inside any outer ring of geom."""
+    if geom["type"] == "Polygon":
+        return point_in_ring(lat, lon, geom["coordinates"][0])
+    if geom["type"] == "MultiPolygon":
+        return any(point_in_ring(lat, lon, p[0]) for p in geom["coordinates"])
+    return False
+
+
+def geom_bbox(geom):
+    """Return (min_lon, max_lon, min_lat, max_lat) of the geometry."""
+    if geom["type"] == "Polygon":
+        coords = geom["coordinates"][0]
+    elif geom["type"] == "MultiPolygon":
+        coords = [c for p in geom["coordinates"] for c in p[0]]
+    else:
+        return None
+    lons = [c[0] for c in coords]
+    lats = [c[1] for c in coords]
+    return min(lons), max(lons), min(lats), max(lats)
+
+
+def split_into_cells(geom, name, admin, stations):
+    """
+    Replace a large polygon with GRID_CELL_DEG-degree square grid cells.
+    Each cell whose centroid falls inside the polygon is kept and assigned
+    the value of its nearest NOAA station.
+    Returns a list of GeoJSON Feature dicts (may be empty for edge cases).
+    """
+    bbox = geom_bbox(geom)
+    if not bbox:
+        return []
+    min_lon, max_lon, min_lat, max_lat = bbox
+
+    # Skip antimeridian-spanning features (e.g. Chukotka); fall back to polygon
+    if max_lon - min_lon > 180:
+        return []
+
+    lon_start = math.floor(min_lon / GRID_CELL_DEG) * GRID_CELL_DEG
+    lat_start = math.floor(min_lat / GRID_CELL_DEG) * GRID_CELL_DEG
+
+    cells = []
+    lat = lat_start
+    while lat < max_lat:
+        lon = lon_start
+        while lon < max_lon:
+            clat = lat + GRID_CELL_DEG / 2
+            clon = lon + GRID_CELL_DEG / 2
+            if (LAT_MIN <= clat <= LAT_MAX
+                    and LON_MIN <= clon <= LON_MAX
+                    and point_in_geom(clat, clon, geom)):
+                val, d = nearest_station(clat, clon, stations)
+                perfect_days = val if d <= MAX_DIST_DEG else None
+                cells.append({
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": [[
+                            [round(lon,                COORD_PREC), round(lat,                COORD_PREC)],
+                            [round(lon + GRID_CELL_DEG, COORD_PREC), round(lat,                COORD_PREC)],
+                            [round(lon + GRID_CELL_DEG, COORD_PREC), round(lat + GRID_CELL_DEG, COORD_PREC)],
+                            [round(lon,                COORD_PREC), round(lat + GRID_CELL_DEG, COORD_PREC)],
+                            [round(lon,                COORD_PREC), round(lat,                COORD_PREC)],
+                        ]]
+                    },
+                    "properties": {
+                        "name":         name,
+                        "admin":        admin,
+                        "perfect_days": perfect_days,
+                    },
+                })
+            lon += GRID_CELL_DEG
+        lat += GRID_CELL_DEG
+
+    return cells
+
+
+# ── Main processing ───────────────────────────────────────────────────────────
+
 def process(features, stations, label, only_admins=None, skip_admins=None):
     """
-    Filter features to bounding box, optionally restrict/exclude countries,
-    assign nearest station, return enriched Feature list.
-    only_admins : set of admin strings to keep (None = keep all)
-    skip_admins : set of admin strings to exclude (None = exclude none)
+    Filter features, optionally restrict/exclude countries, assign station data.
+    Large regions (> LARGE_REGION_DEG2) are split into station-grid cells.
+    Returns enriched Feature list.
     """
     out = []
+    split_count = 0
+
     for feat in features:
         geom  = feat.get("geometry")
         props = feat.get("properties") or {}
         if not geom:
             continue
 
-        # Extract country name — check both lower and UPPER case (admin-1 vs admin-2)
+        # Country identifier — check both lower and UPPER case (admin-1 vs admin-2)
         adm = (props.get("admin") or props.get("ADMIN") or
                props.get("adm0_a3") or props.get("ADM0_A3") or
                props.get("sov_a3")  or props.get("SOV_A3") or
@@ -132,11 +255,22 @@ def process(features, stations, label, only_admins=None, skip_admins=None):
         if not (LAT_MIN <= clat <= LAT_MAX and LON_MIN <= clon <= LON_MAX):
             continue
 
-        val, d = nearest_station(clat, clon, stations)
-        perfect_days = val if d <= MAX_DIST_DEG else None
-
         name = (props.get("name") or props.get("NAME") or props.get("NAME_EN") or
                 props.get("gn_name") or props.get("NAME_ALT") or "")
+
+        # ── Large region → replace with station-grid cells ────────────────────
+        area = feature_area_deg2(geom)
+        if area > LARGE_REGION_DEG2:
+            cells = split_into_cells(geom, name, adm, stations)
+            if cells:
+                out.extend(cells)
+                split_count += 1
+                continue
+            # Fall through to normal handling if split returned nothing
+
+        # ── Normal-sized region → use original polygon ────────────────────────
+        val, d = nearest_station(clat, clon, stations)
+        perfect_days = val if d <= MAX_DIST_DEG else None
 
         out.append({
             "type": "Feature",
@@ -153,7 +287,8 @@ def process(features, stations, label, only_admins=None, skip_admins=None):
 
     valid   = sum(1 for f in out if f["properties"]["perfect_days"] is not None)
     no_data = len(out) - valid
-    print(f"    {label}: {len(out)} regions  ({valid} with data, {no_data} no-data)")
+    print(f"    {label}: {len(out)} regions  "
+          f"({valid} with data, {no_data} no-data, {split_count} split into cells)")
     return out
 
 
@@ -169,7 +304,6 @@ def main():
     print("[1/2]  US Counties — Natural Earth 10m admin-2")
     admin2 = download(ADMIN2_URL, "admin-2 counties")
     if admin2:
-        # The 'admin' field in admin-2 is the country name
         us_feats = process(
             admin2["features"], stations,
             "US counties",
@@ -177,11 +311,10 @@ def main():
         )
         all_features.extend(us_feats)
 
-    # ── 2. Rest of world admin-1 ─────────────────────────────────────────────
+    # ── 2. World (non-US) admin-1 ─────────────────────────────────────────────
     print("\n[2/2]  World admin-1 — Natural Earth 10m admin-1")
     admin1 = download(ADMIN1_URL, "admin-1 states/provinces")
     if admin1:
-        # Exclude the US — we already have county-level US from admin-2
         non_us = process(
             admin1["features"], stations,
             "World admin-1 (non-US)",
@@ -205,7 +338,9 @@ def main():
         "// Perfect-weather choropleth data — worldwide\n"
         "// US counties: Natural Earth 10m admin-2\n"
         "// World (non-US) admin-1: Natural Earth 10m admin-1\n"
-        "// Canada: 13 provinces/territories (finest granularity available)\n"
+        "// Regions > 30 deg² (shoelace) split into 3° station-grid cells\n"
+        "// Canada: all provinces split into grid cells (finest accessible source)\n"
+        "// Source: NOAA GSOD via AWS S3, 2021-2023\n"
         "// properties.perfect_days = avg days/yr (null = no data)\n"
     )
     with open(OUTPUT, "w") as f:
